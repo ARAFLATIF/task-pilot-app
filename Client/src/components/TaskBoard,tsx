@@ -1,0 +1,70 @@
+import { useEffect, useState } from 'react';
+import Column from './Column';
+import { DragDropContext, Droppable, DropResult } from 'react-beautiful-dnd';
+import io from 'socket.io-client';
+import { api } from '../api';
+import AddTaskForm from './AddTaskForm';
+const socket = io('http://localhost:5000');
+
+const TaskBoard = () => {
+  const [columns, setColumns] = useState<Record<string, any[]>>({});
+
+  const fetchTasks = () => {
+    api.get('/tasks').then((res) => {
+      const colMap = { 'To Do': [], 'In Progress': [], 'Done': [] };
+      res.data.forEach((task: any) => colMap[task.status].push(task));
+      setColumns(colMap);
+    });
+  };
+
+  useEffect(() => {
+    fetchTasks();
+    socket.on('task-updated', fetchTasks);
+  }, []);
+
+  const onDragEnd = (result: DropResult) => {
+    const { source, destination } = result;
+    if (!destination) return;
+
+    const srcCol = source.droppableId;
+    const destCol = destination.droppableId;
+    const dragged = columns[srcCol][source.index];
+
+    const updatedSrc = [...columns[srcCol]];
+    updatedSrc.splice(source.index, 1);
+    const updatedDest = [...columns[destCol]];
+    updatedDest.splice(destination.index, 0, dragged);
+
+    dragged.status = destCol;
+    setColumns({ ...columns, [srcCol]: updatedSrc, [destCol]: updatedDest });
+    api.put(`/tasks/${dragged._id}`, dragged);
+    socket.emit('task-updated');
+  };
+
+  return (
+    <>
+      <AddTaskForm onTaskAdded={fetchTasks} />
+      <DragDropContext onDragEnd={onDragEnd}>
+        <div className="flex flex-col md:flex-row gap-4 justify-center">
+          {Object.entries(columns).map(([colName, tasks]) => (
+            <Droppable droppableId={colName} key={colName}>
+              {(provided) => (
+                <div
+                  ref={provided.innerRef}
+                  {...provided.droppableProps}
+                  className="bg-white shadow-md rounded-md p-4 w-72"
+                >
+                  <h2 className="text-xl font-semibold text-center mb-3">{colName}</h2>
+                  <Column tasks={tasks} colId={colName} />
+                  {provided.placeholder}
+                </div>
+              )}
+            </Droppable>
+          ))}
+        </div>
+      </DragDropContext>
+    </>
+  );
+};
+
+export default TaskBoard;
